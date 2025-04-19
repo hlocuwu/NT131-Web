@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Button 1 Page</title>
+    <link rel="stylesheet" href="../custom/styles.css">
+</head>
+<body>
+
+<header>
+    <div class="logo" onclick="location.href='index.html'">Logo</div>
+    <div class="buttons">
+        <button class="button" onclick="location.href='camera.html'">Giám sát</button>
+        <button class="button" onclick="location.href='chart.html'">Thống kê</button>
+        <button class="button" onclick="location.href='setting.html'">Cài đặt</button>
+    </div>
+</header>
+
+<div class="content">
+    <div class="content">
+        <h2>Camera Stream</h2>
+        <!-- Sử dụng thẻ <img> để nhận stream MJPEG từ server -->
+        <img src="/video_feed" alt="Video Stream" width="640" height="480">
+    </div>
+
+</body>
+</html>
