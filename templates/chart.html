@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Button 2 Page</title>
     <link rel="stylesheet" href="../custom/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
@@ -19,9 +20,83 @@
 
 <div class="content">
     <div class="tab">
-        This is the content for Button 2. Here you can add more information about Button 2.
+        <h2>Biểu đồ giám sát hệ thống</h2>
+        <canvas id="cpuChart" width="400" height="150"></canvas>
+        <canvas id="memChart" width="400" height="150"></canvas>
     </div>
 </div>
+
+<script>
+    const cpuCtx = document.getElementById('cpuChart').getContext('2d');
+    const memCtx = document.getElementById('memChart').getContext('2d');
+
+    const cpuChart = new Chart(cpuCtx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'CPU Usage (%)',
+                borderColor: 'red',
+                borderWidth: 2,
+                data: []
+            }]
+        },
+        options: {
+            responsive: true,
+            animation: false,
+            scales: {
+                y: {
+                    suggestedMin: 0,
+                    suggestedMax: 100
+                }
+            }
+        }
+    });
+
+    const memChart = new Chart(memCtx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Memory Usage (%)',
+                borderColor: 'blue',
+                borderWidth: 2,
+                data: []
+            }]
+        },
+        options: {
+            responsive: true,
+            animation: false,
+            scales: {
+                y: {
+                    suggestedMin: 0,
+                    suggestedMax: 100
+                }
+            }
+        }
+    });
+
+    setInterval(async () => {
+        const res = await fetch('/get_metrics');
+        const data = await res.json();
+        const now = new Date().toLocaleTimeString();
+
+        cpuChart.data.labels.push(now);
+        cpuChart.data.datasets[0].data.push(data.cpu);
+        memChart.data.labels.push(now);
+        memChart.data.datasets[0].data.push(data.memory);
+
+        if (cpuChart.data.labels.length > 20) {
+            cpuChart.data.labels.shift();
+            cpuChart.data.datasets[0].data.shift();
+            memChart.data.labels.shift();
+            memChart.data.datasets[0].data.shift();
+        }
+
+        cpuChart.update();
+        memChart.update();
+    }, 1000);
+</script>
 
 </body>
 </html>
