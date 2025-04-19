@@ -10,22 +10,22 @@ app = FastAPI()
 # Đọc và render HTML templates
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    with open('templates/index.html') as f:
+    with open('../templates/index.html') as f:
         return f.read()
 
 @app.get("/camera", response_class=HTMLResponse)
 async def camera_page():
-    with open('templates/camera.html') as f:
+    with open('../templates/camera.html') as f:
         return f.read()
 
 @app.get("/chart", response_class=HTMLResponse)
 async def chart_page():
-    with open('templates/chart.html') as f:
+    with open('../templates/chart.html') as f:
         return f.read()
 
 @app.get("/setting", response_class=HTMLResponse)
 async def setting_page():
-    with open('templates/setting.html') as f:
+    with open('../templates/setting.html') as f:
         return f.read()
 
 # Tạo MJPEG stream
