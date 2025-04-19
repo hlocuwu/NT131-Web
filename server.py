@@ -51,4 +51,8 @@ async def upload(file: UploadFile = File(...)):
     return {"message": "Image received successfully"}
 
 # Cung cấp thư mục static
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/custom", StaticFiles(directory="custom"), name="custom")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
