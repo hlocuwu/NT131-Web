@@ -19,8 +19,18 @@
 
 <div class="content">
     <h2>Camera Stream</h2>
-    <!-- Sử dụng thẻ <img> để nhận stream MJPEG từ server -->
-    <img src="/video_feed" alt="Video Stream" width="950" height="550" style="border: 5px solid rgb(255, 0, 0);">
+    <div class="main-layout">
+        <div class="main-stream">
+            <img src="/video_feed" alt="Video Stream" width="950" height="550" style="border: 5px solid rgb(255, 0, 0);">
+        </div>
+
+        <div class="trigger-panel">
+            <div class="trigger-frame">
+                <img src="/trigger_feed" alt="Trigger Frame" width="300" height="200">
+            </div>
+            <button class="trigger-button">RESET</button>
+        </div>
+    </div>
 </div>
 </body>
 </html>
