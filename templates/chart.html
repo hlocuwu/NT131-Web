@@ -20,15 +20,17 @@
 
 <div class="content">
     <div class="tab">
-        <h2>Biểu đồ giám sát hệ thống</h2>
+        <h2>Biểu đồ hệ thống</h2>
         <canvas id="cpuChart" width="400" height="150"></canvas>
         <canvas id="memChart" width="400" height="150"></canvas>
+        <canvas id="bwChart" width="400" height="150"></canvas>
     </div>
 </div>
 
 <script>
     const cpuCtx = document.getElementById('cpuChart').getContext('2d');
     const memCtx = document.getElementById('memChart').getContext('2d');
+    const bwCtx = document.getElementById('bwChart').getContext('2d');
 
     const cpuChart = new Chart(cpuCtx, {
         type: 'line',
@@ -76,25 +78,58 @@
         }
     });
 
-    setInterval(async () => {
-        const res = await fetch('/get_metrics');
-        const data = await res.json();
-        const now = new Date().toLocaleTimeString();
-
-        cpuChart.data.labels.push(now);
-        cpuChart.data.datasets[0].data.push(data.cpu);
-        memChart.data.labels.push(now);
-        memChart.data.datasets[0].data.push(data.memory);
-
-        if (cpuChart.data.labels.length > 20) {
-            cpuChart.data.labels.shift();
-            cpuChart.data.datasets[0].data.shift();
-            memChart.data.labels.shift();
-            memChart.data.datasets[0].data.shift();
+    const bwChart = new Chart(bwCtx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Bandwidth Usage (Mbps)',
+                borderColor: 'green',
+                borderWidth: 2,
+                data: []
+            }]
+        },
+        options: {
+            responsive: true,
+            animation: false,
+            scales: {
+                y: {
+                    suggestedMin: 0,
+                    suggestedMax: 100
+                }
+            }
         }
+    });
 
-        cpuChart.update();
-        memChart.update();
+    setInterval(async () => {
+        try {
+            const res = await fetch('/get_metrics');
+            const data = await res.json();
+            const now = new Date().toLocaleTimeString();
+
+            cpuChart.data.labels.push(now);
+            cpuChart.data.datasets[0].data.push(data.cpu);
+            memChart.data.labels.push(now);
+            memChart.data.datasets[0].data.push(data.memory);
+            bwChart.data.labels.push(now);
+            bwChart.data.datasets[0].data.push(data.bandwidth);
+
+
+            if (cpuChart.data.labels.length > 20) {
+                cpuChart.data.labels.shift();
+                cpuChart.data.datasets[0].data.shift();
+                memChart.data.labels.shift();
+                memChart.data.datasets[0].data.shift();
+                bwChart.data.labels.shift();
+                    bwChart.data.datasets[0].data.shift();
+            }
+
+            cpuChart.update();
+            memChart.update();
+            bwChart.update();
+        } catch (err) {
+            console.error('Error fetching metrics:', err);
+        }
     }, 1000);
 </script>
 
