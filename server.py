@@ -2,6 +2,11 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import threading
+import time
+import cv2
+import numpy as np
+import mediapipe as mp
+from io import BytesIO
 
 app = FastAPI()
 
@@ -46,10 +51,39 @@ async def video_feed():
 # API nhận ảnh từ laptop
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
-    global latest_frame
+    global latest_frame, fall_frame, last_fall_time
+
     content = await file.read()
     latest_frame = content
-    return {"message": "Image received successfully"}
+
+    # Decode ảnh
+    np_img = np.frombuffer(content, np.uint8)
+    img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
+
+    # Chạy MediaPipe Pose
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    results = pose.process(img_rgb)
+
+    if results.pose_landmarks:
+        landmarks = results.pose_landmarks.landmark
+
+        # Logic phát hiện té ngã (đơn giản: góc lưng ngang quá thấp)
+        nose = landmarks[mp_pose.PoseLandmark.NOSE.value]
+        left_hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
+        right_hip = landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value]
+        avg_hip_y = (left_hip.y + right_hip.y) / 2
+
+        # Điều kiện đơn giản: nếu đầu (mũi) thấp hơn hông → té
+        if nose.y > avg_hip_y:
+            current_time = time.time()
+            if current_time - last_fall_time > 10:  # mỗi 10s lưu lại 1 lần
+                # Encode ảnh lại
+                _, jpeg = cv2.imencode('.jpg', img)
+                fall_frame = jpeg.tobytes()
+                last_fall_time = current_time
+                print("Phát hiện té ngã!")
+    
+    return {"message": "Image processed"}
 
 # Nhận và lưu dữ liệu CPU / Memory từ client
 metrics_data = {"cpu": 0, "memory": 0, "bandwidth": 0}
@@ -65,6 +99,28 @@ async def receive_metrics(data: dict):
 async def get_metrics():
     return metrics_data
 
+@app.get("/trigger_feed")
+async def trigger_feed():
+    global fall_frame
+    if fall_frame:
+        return StreamingResponse(BytesIO(fall_frame), media_type="image/jpeg")
+    else:
+        # Trả về ảnh trống (hoặc placeholder nếu muốn)
+        blank = np.zeros((200, 300, 3), dtype=np.uint8)
+        _, jpeg = cv2.imencode('.jpg', blank)
+        return StreamingResponse(BytesIO(jpeg.tobytes()), media_type="image/jpeg")
+
+
+# AI
+latest_frame = None
+fall_frame = None
+last_fall_time = 0
+
+mp_pose = mp.solutions.pose
+pose = mp_pose.Pose()
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+
+

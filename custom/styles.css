@@ -6,6 +6,7 @@ body {
 
 header {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
     background-color: #f8f9fa;
@@ -21,7 +22,9 @@ header {
 
 .buttons {
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
+    margin-top: 10px;
 }
 
 .button {
@@ -32,6 +35,7 @@ header {
     border-radius: 5px;
     cursor: pointer;
     transition: background-color 0.3s;
+    white-space: nowrap;
 }
 
 .button:hover {
@@ -51,8 +55,17 @@ header {
 
 .main-layout {
     display: flex;
-    align-items: flex-start;
+    flex-wrap: wrap;
     gap: 20px;
+    justify-content: center;
+}
+
+.main-stream img {
+    width: 100%;
+    max-width: 950px;
+    height: auto;
+    border: 5px solid rgb(255, 0, 0);
+    border-radius: 8px;
 }
 
 .trigger-panel {
@@ -60,10 +73,13 @@ header {
     flex-direction: column;
     align-items: center;
     gap: 15px;
-    margin-top: 20px;
+    max-width: 320px;
+    width: 100%;
 }
 
 .trigger-frame img {
+    width: 100%;
+    height: auto;
     border: 3px solid rgb(0, 102, 255);
     border-radius: 6px;
 }
@@ -80,4 +96,30 @@ header {
 
 .trigger-button:hover {
     background-color: rgb(0, 85, 212);
+}
+
+/* 🌐 Responsive tweaks for smaller screens */
+@media (max-width: 768px) {
+    header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .buttons {
+        justify-content: flex-start;
+    }
+
+    .main-layout {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .main-stream img {
+        max-width: 100%;
+    }
+
+    .trigger-panel {
+        margin-top: 10px;
+    }
 }
