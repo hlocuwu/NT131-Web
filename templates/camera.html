@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Button 1 Page</title>
+    <title>Giám sát</title>
     <link rel="stylesheet" href="../custom/styles.css">
 </head>
 <body>
@@ -11,7 +11,7 @@
 <header>
     <div class="logo" onclick="location.href='/'">Logo</div>
     <div class="buttons">
-        <button class="button" onclick="location.href='/camera'">Giám sát</button>
+        <button class="button active" onclick="location.href='/camera'">Giám sát</button>
         <button class="button" onclick="location.href='/chart'">Thống kê</button>
         <button class="button" onclick="location.href='/setting'">Cài đặt</button>
     </div>
@@ -26,18 +26,22 @@
 
         <div class="trigger-panel">
             <div class="trigger-frame">
-                <img src="/trigger_feed" alt="Trigger Frame" width="300" height="200">
+                <img id="trigger-image" src="/trigger_feed" alt="Trigger Frame" width="300" height="200">
             </div>
-            <button class="trigger-button">RESET</button>
+            <button class="trigger-button" onclick="resetTrigger()">RESET</button>
         </div>
     </div>
 </div>
 
 <script>
+    function resetTrigger() {
+        const img = document.getElementById('trigger-image');
+        img.src = '/trigger_feed?' + new Date().getTime(); // Force reload to blank image
+    }
+
     setInterval(() => {
-        const img = document.querySelector('.trigger-frame img');
-        img.src = '/trigger_feed?' + new Date().getTime(); // tránh cache
-    }, 1000); // mỗi giây refresh
+        // Không cần refresh liên tục, ảnh trigger sẽ tự động cập nhật khi có té ngã
+    }, 1000);
 </script>
 
 </body>

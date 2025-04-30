@@ -38,7 +38,7 @@ def send_camera():
                 print(f"Failed to send frame. Code: {response.status_code}")
         except Exception as e:
             print(f"Frame error: {e}")
-        time.sleep(0.033)  # ~30fps
+        time.sleep(1/144)  # ~30fps
 
 if __name__ == "__main__":
     threading.Thread(target=send_metrics, daemon=True).start()
