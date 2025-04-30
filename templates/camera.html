@@ -32,5 +32,13 @@
         </div>
     </div>
 </div>
+
+<script>
+    setInterval(() => {
+        const img = document.querySelector('.trigger-frame img');
+        img.src = '/trigger_feed?' + new Date().getTime(); // tránh cache
+    }, 1000); // mỗi giây refresh
+</script>
+
 </body>
 </html>

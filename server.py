@@ -13,7 +13,18 @@ app = FastAPI()
 # Cung cấp thư mục static
 app.mount("/custom", StaticFiles(directory="custom"), name="custom")
 
-# Đọc và render HTML templates
+# Load pose detection
+mp_pose = mp.solutions.pose
+mp_drawing = mp.solutions.drawing_utils
+pose = mp_pose.Pose()
+
+# Shared states
+latest_frame = None
+fall_frame = None
+last_fall_time = 0
+metrics_data = {"cpu": 0, "memory": 0}
+
+# Trang HTML
 @app.get("/", response_class=HTMLResponse)
 async def index():
     with open('templates/index.html') as f:
@@ -34,60 +45,68 @@ async def setting_page():
     with open('templates/setting.html') as f:
         return f.read()
 
-# Tạo MJPEG stream
-latest_frame = None
+# Stream camera chính
 def generate():
     global latest_frame
     while True:
         if latest_frame:
-            frame = latest_frame
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            yield (
+                b'--frame\r\n'
+                b'Content-Type: image/jpeg\r\n\r\n' + latest_frame + b'\r\n'
+            )
+        time.sleep(0.05)
 
 @app.get("/video_feed")
 async def video_feed():
     return StreamingResponse(generate(), media_type="multipart/x-mixed-replace; boundary=frame")
 
-# API nhận ảnh từ laptop
+# Nhận ảnh từ client
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
     global latest_frame, fall_frame, last_fall_time
 
     content = await file.read()
-    latest_frame = content
-
-    # Decode ảnh
     np_img = np.frombuffer(content, np.uint8)
     img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
 
-    # Chạy MediaPipe Pose
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     results = pose.process(img_rgb)
 
     if results.pose_landmarks:
-        landmarks = results.pose_landmarks.landmark
+        mp_drawing.draw_landmarks(img, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
-        # Logic phát hiện té ngã (đơn giản: góc lưng ngang quá thấp)
+        landmarks = results.pose_landmarks.landmark
         nose = landmarks[mp_pose.PoseLandmark.NOSE.value]
         left_hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
         right_hip = landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value]
         avg_hip_y = (left_hip.y + right_hip.y) / 2
 
-        # Điều kiện đơn giản: nếu đầu (mũi) thấp hơn hông → té
+        print(f"nose.y: {nose.y}, avg_hip_y: {avg_hip_y}")  # Debug
+
         if nose.y > avg_hip_y:
             current_time = time.time()
-            if current_time - last_fall_time > 10:  # mỗi 10s lưu lại 1 lần
-                # Encode ảnh lại
-                _, jpeg = cv2.imencode('.jpg', img)
-                fall_frame = jpeg.tobytes()
+            if current_time - last_fall_time > 10:
+                _, jpeg_fall = cv2.imencode('.jpg', img)
+                fall_frame = jpeg_fall.tobytes()
                 last_fall_time = current_time
                 print("Phát hiện té ngã!")
-    
+
+    _, jpeg = cv2.imencode('.jpg', img)
+    latest_frame = jpeg.tobytes()
     return {"message": "Image processed"}
 
-# Nhận và lưu dữ liệu CPU / Memory từ client
-metrics_data = {"cpu": 0, "memory": 0}
+# Trigger feed (ảnh khi té ngã)
+@app.get("/trigger_feed")
+async def trigger_feed():
+    global fall_frame
+    if fall_frame:
+        return StreamingResponse(BytesIO(fall_frame), media_type="image/jpeg")
+    else:
+        blank = np.zeros((200, 300, 3), dtype=np.uint8)
+        _, jpeg = cv2.imencode('.jpg', blank)
+        return StreamingResponse(BytesIO(jpeg.tobytes()), media_type="image/jpeg")
 
+# Nhận metrics
 @app.post("/metrics")
 async def receive_metrics(data: dict):
     metrics_data["cpu"] = data["cpu"]
@@ -98,28 +117,6 @@ async def receive_metrics(data: dict):
 async def get_metrics():
     return metrics_data
 
-@app.get("/trigger_feed")
-async def trigger_feed():
-    global fall_frame
-    if fall_frame:
-        return StreamingResponse(BytesIO(fall_frame), media_type="image/jpeg")
-    else:
-        # Trả về ảnh trống (hoặc placeholder nếu muốn)
-        blank = np.zeros((200, 300, 3), dtype=np.uint8)
-        _, jpeg = cv2.imencode('.jpg', blank)
-        return StreamingResponse(BytesIO(jpeg.tobytes()), media_type="image/jpeg")
-
-
-# AI
-latest_frame = None
-fall_frame = None
-last_fall_time = 0
-
-mp_pose = mp.solutions.pose
-pose = mp_pose.Pose()
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
-
-

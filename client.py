@@ -27,8 +27,11 @@ def send_camera():
             continue
 
         _, img_encoded = cv2.imencode('.jpg', frame)
+        files = {
+            'file': ('frame.jpg', img_encoded.tobytes(), 'image/jpeg')
+        }
         try:
-            response = requests.post(f"{SERVER_URL}/upload", files={'file': img_encoded.tobytes()})
+            response = requests.post(f"{SERVER_URL}/upload", files=files)
             if response.status_code == 200:
                 print("Frame sent.")
             else:
