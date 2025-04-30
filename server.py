@@ -86,13 +86,12 @@ async def upload(file: UploadFile = File(...)):
     return {"message": "Image processed"}
 
 # Nhận và lưu dữ liệu CPU / Memory từ client
-metrics_data = {"cpu": 0, "memory": 0, "bandwidth": 0}
+metrics_data = {"cpu": 0, "memory": 0}
 
 @app.post("/metrics")
 async def receive_metrics(data: dict):
     metrics_data["cpu"] = data["cpu"]
     metrics_data["memory"] = data["memory"]
-    metrics_data["bandwidth"] = data["bandwidth"]
     return {"status": "received"}
 
 @app.get("/get_metrics")
