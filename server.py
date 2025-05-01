@@ -76,10 +76,9 @@ async def video_feed():
 # === HÀM PHÁT HIỆN TÉ NGÃ ĐƠN GIẢN HÓA (Nằm xuống = Ngã) ===
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
-    # Loại bỏ pose_history và is_falling khỏi global nếu không dùng ở đâu khác
     global latest_frame, fall_frame, last_fall_time
 
-    start_time = time.time() # Đo thời gian xử lý (tùy chọn)
+    start_time = time.time()
 
     content = await file.read()
     np_img = np.frombuffer(content, np.uint8)
@@ -89,80 +88,40 @@ async def upload(file: UploadFile = File(...)):
         print("Lỗi: Không thể decode ảnh")
         return {"message": "Image decode error"}
 
-    # Giảm kích thước ảnh để tăng tốc độ xử lý (tùy chọn, có thể ảnh hưởng độ chính xác)
-    # height, width = img.shape[:2]
-    # if width > 640:
-    #    scale = 640 / width
-    #    img = cv2.resize(img, (640, int(height * scale)), interpolation=cv2.INTER_AREA)
-
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     results = pose.process(img_rgb)
 
     detected_fall_this_frame = False
-    # current_pose_data không còn cần thiết
+    current_time = time.time()
 
     if results.pose_landmarks:
-        # Vẽ landmarks lên ảnh gốc (màu BGR)
+        # Vẽ landmarks lên ảnh
         mp_drawing.draw_landmarks(
             img,
             results.pose_landmarks,
             mp_pose.POSE_CONNECTIONS,
             landmark_drawing_spec=mp_drawing.DrawingSpec(color=(245,117,66), thickness=2, circle_radius=2),
             connection_drawing_spec=mp_drawing.DrawingSpec(color=(245,66,230), thickness=2, circle_radius=2)
-            )
+        )
 
-        landmarks = results.pose_landmarks.landmark
+        # Trigger phát hiện "té ngã" đơn giản mỗi khi thấy pose
+        if current_time - last_fall_time > fall_cooldown:
+            detected_fall_this_frame = True
+            last_fall_time = current_time
+            print("!!! PHÁT HIỆN POSE (Giả lập té ngã) !!!")
 
-        # Lấy các landmark cần thiết và kiểm tra visibility
-        nose = landmarks[mp_pose.PoseLandmark.NOSE.value]
-        left_hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
-        right_hip = landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value]
+            _, jpeg_fall = cv2.imencode('.jpg', img)
+            fall_frame = jpeg_fall.tobytes()
 
-        # Chỉ xử lý nếu các landmark quan trọng được nhìn thấy rõ ràng
-        if (nose.visibility > VISIBILITY_THRESHOLD and
-            left_hip.visibility > VISIBILITY_THRESHOLD and
-            right_hip.visibility > VISIBILITY_THRESHOLD):
-
-            avg_hip_y = (left_hip.y + right_hip.y) / 2
-            current_nose_y = nose.y
-
-            # --- Logic phát hiện té ngã ĐƠN GIẢN ---
-            # Chỉ cần kiểm tra mũi có thấp hơn hông không (Y lớn hơn)
-            is_in_low_position = current_nose_y > avg_hip_y
-
-            # Debug print
-            print(f"NoseY: {current_nose_y:.3f}, AvgHipY: {avg_hip_y:.3f}, Low: {is_in_low_position}")
-
-            # Kiểm tra phát hiện "ngã" (nằm xuống)
-            current_time = time.time()
-            if is_in_low_position:
-                # Kiểm tra cooldown
-                if current_time - last_fall_time > fall_cooldown:
-                    detected_fall_this_frame = True
-                    # is_falling = True # Không cần thiết nữa
-                    last_fall_time = current_time # Cập nhật thời điểm phát hiện cuối cùng
-                    print(f"!!! PHÁT HIỆN NẰM XUỐNG (Simplified Trigger) !!!")
-
-                    # Lưu ảnh tại thời điểm phát hiện
-                    _, jpeg_fall = cv2.imencode('.jpg', img)
-                    fall_frame = jpeg_fall.tobytes()
-                else:
-                    # Vẫn đang nằm và trong thời gian cooldown
-                    # print(f"Đang nằm, trong cooldown.") # Có thể bỏ print này cho đỡ nhiễu
-                    pass # Không làm gì nếu đang cooldown
-        else:
-            print("Cảnh báo: Không đủ visibility của landmarks quan trọng.")
-
-
-    # --- Cập nhật frame và trả về ---
     # Luôn cập nhật latest_frame để hiển thị stream chính
     _, jpeg = cv2.imencode('.jpg', img)
     latest_frame = jpeg.tobytes()
 
     processing_time = time.time() - start_time
-    # print(f"Thời gian xử lý frame: {processing_time:.4f} giây") # Debug thời gian
 
     return {"message": "Image processed", "fall_detected": detected_fall_this_frame}
+
+
 
 # Trigger feed (ảnh khi té ngã) (Giữ nguyên)
 @app.get("/trigger_feed")
