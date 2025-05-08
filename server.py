@@ -7,7 +7,11 @@ import cv2
 import numpy as np
 import mediapipe as mp
 from io import BytesIO
-# import collections # Không còn sử dụng collections
+# import collections
+from google.cloud import storage
+import json
+from collections import defaultdict
+from datetime import datetime
 
 app = FastAPI()
 
@@ -35,6 +39,29 @@ fall_cooldown = 5 # Giảm cooldown để test nhanh hơn (có thể chỉnh l�
 # Không cần ngưỡng vận tốc
 # Không cần offset vị trí cuối
 VISIBILITY_THRESHOLD = 0.6 # Giữ lại kiểm tra visibility
+
+def log_fall_event_to_gcs(image_bytes: bytes, timestamp: float):
+    client = storage.Client()
+    bucket = client.bucket("fall-event-log")  # Thay bằng tên bucket của bạn
+
+    # Định dạng tên file theo timestamp
+    readable_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime(timestamp))
+    image_filename = f"fall_events/{readable_time}.jpg"
+    json_filename = f"fall_events/{readable_time}.json"
+
+    # Upload ảnh
+    image_blob = bucket.blob(image_filename)
+    image_blob.upload_from_string(image_bytes, content_type="image/jpeg")
+
+    # Tạo và upload metadata (json)
+    event_info = {
+        "event": "fall_detected",
+        "timestamp": readable_time,
+    }
+    json_blob = bucket.blob(json_filename)
+    json_blob.upload_from_string(json.dumps(event_info, indent=2), content_type="application/json")
+
+    print(f"[GCS] Uploaded fall image and metadata at {readable_time}")
 
 # Trang HTML (Giữ nguyên các hàm @app.get)
 @app.get("/", response_class=HTMLResponse)
@@ -112,6 +139,8 @@ async def upload(file: UploadFile = File(...)):
 
             _, jpeg_fall = cv2.imencode('.jpg', img)
             fall_frame = jpeg_fall.tobytes()
+            log_fall_event_to_gcs(fall_frame, current_time)
+
 
     # Luôn cập nhật latest_frame để hiển thị stream chính
     _, jpeg = cv2.imencode('.jpg', img)
@@ -148,6 +177,44 @@ async def receive_metrics(data: dict):
 @app.get("/get_metrics")
 async def get_metrics():
     return metrics_data
+
+@app.get("/fall_stats")
+async def fall_stats():
+    client = storage.Client()
+    bucket = client.bucket("fall-log-data")  # thay bằng bucket của bạn
+
+    blobs = bucket.list_blobs(prefix="fall_events/")
+    stats_day = defaultdict(int)
+    stats_week = defaultdict(int)
+    stats_month = defaultdict(int)
+
+    for blob in blobs:
+        if blob.name.endswith(".json"):
+            # Trích thời gian từ tên file
+            try:
+                timestamp_str = blob.name.split("/")[-1].replace(".json", "")
+                dt = datetime.strptime(timestamp_str, "%Y-%m-%d_%H-%M-%S")
+
+                # Ngày
+                day_key = dt.strftime("%Y-%m-%d")
+                stats_day[day_key] += 1
+
+                # Tuần
+                week_key = dt.strftime("%Y-W%U")
+                stats_week[week_key] += 1
+
+                # Tháng
+                month_key = dt.strftime("%Y-%m")
+                stats_month[month_key] += 1
+
+            except Exception as e:
+                print("Lỗi đọc timestamp:", blob.name, e)
+
+    return {
+        "day": dict(stats_day),
+        "week": dict(stats_week),
+        "month": dict(stats_month),
+    }
 
 if __name__ == "__main__":
     import uvicorn

@@ -19,9 +19,73 @@
 
 <div class="content">
     <div class="tab">
-        This is the content for Button 3. Here you can add more information about Button 3.
+        <h2>Thống kê té ngã</h2>
+        <canvas id="dayChart" height="100"></canvas>
+        <canvas id="weekChart" height="100"></canvas>
+        <canvas id="monthChart" height="100"></canvas>
     </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        function updateCharts() {
+            fetch('/fall_stats')
+                .then(res => res.json())
+                .then(data => {
+                    updateChart(dayChart, data.day);
+                    updateChart(weekChart, data.week);
+                    updateChart(monthChart, data.month);
+                });
+        }
+        
+        function updateChart(chart, dataset) {
+            const labels = Object.keys(dataset).sort();
+            const values = labels.map(key => dataset[key]);
+        
+            chart.data.labels = labels;
+            chart.data.datasets[0].data = values;
+            chart.update();
+        }
+        
+        let dayChart, weekChart, monthChart;
+        
+        fetch('/fall_stats')
+            .then(res => res.json())
+            .then(data => {
+                dayChart = createChart('dayChart', 'Té ngã theo ngày', data.day);
+                weekChart = createChart('weekChart', 'Té ngã theo tuần', data.week);
+                monthChart = createChart('monthChart', 'Té ngã theo tháng', data.month);
+        
+                // Cập nhật mỗi 30 giây
+                setInterval(updateCharts, 30000);
+            });
+        
+        function createChart(canvasId, title, dataset) {
+            const labels = Object.keys(dataset).sort();
+            const values = labels.map(key => dataset[key]);
+        
+            return new Chart(document.getElementById(canvasId), {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: title,
+                        data: values,
+                        backgroundColor: 'rgba(75, 192, 192, 0.5)'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { display: false },
+                        title: { display: true, text: title }
+                    },
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
+        }
+        </script>            
 </div>
-
 </body>
 </html>
