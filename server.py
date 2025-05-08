@@ -184,36 +184,50 @@ async def fall_stats():
     bucket = client.bucket("fall-log-data")  # thay bằng bucket của bạn
 
     blobs = bucket.list_blobs(prefix="fall_events/")
-    stats_day = defaultdict(int)
-    stats_week = defaultdict(int)
-    stats_month = defaultdict(int)
+    
+    # Tạo dictionary để lưu số lần té ngã theo giờ và theo ngày
+    hourly_stats = defaultdict(int)
+    daily_stats = defaultdict(int)
+    
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    current_month = datetime.now().strftime("%Y-%m")
 
     for blob in blobs:
         if blob.name.endswith(".json"):
-            # Trích thời gian từ tên file
             try:
                 timestamp_str = blob.name.split("/")[-1].replace(".json", "")
                 dt = datetime.strptime(timestamp_str, "%Y-%m-%d_%H-%M-%S")
-
-                # Ngày
-                day_key = dt.strftime("%Y-%m-%d")
-                stats_day[day_key] += 1
-
-                # Tuần
-                week_key = dt.strftime("%Y-W%U")
-                stats_week[week_key] += 1
-
-                # Tháng
-                month_key = dt.strftime("%Y-%m")
-                stats_month[month_key] += 1
-
+                
+                # Chỉ lấy dữ liệu của ngày hiện tại cho thống kê giờ
+                if dt.strftime("%Y-%m-%d") == current_date:
+                    hour_key = dt.strftime("%H:00")
+                    hourly_stats[hour_key] += 1
+                
+                # Chỉ lấy dữ liệu của tháng hiện tại cho thống kê ngày
+                if dt.strftime("%Y-%m") == current_month:
+                    day_key = dt.strftime("%Y-%m-%d")
+                    daily_stats[day_key] += 1
+                    
             except Exception as e:
                 print("Lỗi đọc timestamp:", blob.name, e)
 
+    # Đảm bảo có tất cả các giờ trong ngày (từ 00:00 đến 23:00)
+    for hour in range(24):
+        hour_key = f"{hour:02d}:00"
+        if hour_key not in hourly_stats:
+            hourly_stats[hour_key] = 0
+    
+    # Đảm bảo có tất cả các ngày trong tháng
+    today = datetime.now()
+    _, last_day = calendar.monthrange(today.year, today.month)
+    for day in range(1, last_day + 1):
+        day_key = f"{today.year}-{today.month:02d}-{day:02d}"
+        if day_key not in daily_stats:
+            daily_stats[day_key] = 0
+
     return {
-        "day": dict(stats_day),
-        "week": dict(stats_week),
-        "month": dict(stats_month),
+        "hourly": dict(sorted(hourly_stats.items())),
+        "daily": dict(sorted(daily_stats.items())),
     }
 
 if __name__ == "__main__":
