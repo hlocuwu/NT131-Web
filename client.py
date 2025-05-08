@@ -5,11 +5,12 @@ import psutil
 import threading
 from playsound import playsound
 import os
+import dotenv
 
-
+dotenv.load_dotenv()
 SERVER_URL = "http://34.9.237.44:8000"
-TELEGRAM_TOKEN = '7285124282:AAEL3q-2G5KxTZ8hB7a6Hq62E5jR0aVZ1TM'
-TELEGRAM_CHAT_ID = '6510802773'
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 last_alert_time = 0
 alert_cooldown = 5  # giây
