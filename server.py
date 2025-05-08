@@ -42,7 +42,7 @@ VISIBILITY_THRESHOLD = 0.6 # Giữ lại kiểm tra visibility
 
 def log_fall_event_to_gcs(image_bytes: bytes, timestamp: float):
     client = storage.Client()
-    bucket = client.bucket("fall-event-log")  # Thay bằng tên bucket của bạn
+    bucket = client.bucket("fall-log-data")  # Thay bằng tên bucket của bạn
 
     # Định dạng tên file theo timestamp
     readable_time = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime(timestamp))
