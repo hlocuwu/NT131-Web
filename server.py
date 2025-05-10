@@ -11,143 +11,44 @@ import json
 from collections import defaultdict
 from datetime import datetime
 import calendar
-from typing import Optional, Tuple, Dict, List
 import math
 
 app = FastAPI()
+
+# Cung cấp thư mục static
 app.mount("/custom", StaticFiles(directory="custom"), name="custom")
 
-# Pose detection setup
+# Load pose detection
 mp_pose = mp.solutions.pose
 mp_drawing = mp.solutions.drawing_utils
-pose = mp_pose.Pose(
-    min_detection_confidence=0.6,
-    min_tracking_confidence=0.6,
-    model_complexity=1
-    )
+# Giữ lại độ tin cậy để lọc bỏ phát hiện kém
+pose = mp_pose.Pose(min_detection_confidence=0.6, min_tracking_confidence=0.6)
 
 # Shared states
 latest_frame = None
 fall_frame = None
 last_fall_time = 0
 metrics_data = {"cpu": 0, "memory": 0}
-fall_cooldown = 5
 
-# Fall detection parameters
-VISIBILITY_THRESHOLD = 0.6
-FALL_ANGLE_THRESHOLD = 45  # degrees
-FALL_VELOCITY_THRESHOLD = 0.3  # normalized velocity
-FALL_CONFIRMATION_FRAMES = 5  # number of consecutive frames to confirm fall
-MIN_HEIGHT_RATIO = 0.4  # min height ratio to consider as fall
+# --- Biến trạng thái cho phát hiện té ngã ---
+fall_cooldown = 5  # Cooldown giữa các cảnh báo té ngã (giây)
+body_angle = 'front'  # Hướng cơ thể so với camera
+fall_counter = 0  # Số lần té ngã được phát hiện
 
-# Fall detection state
-fall_detection_state = {
-    "fall_counter": 0,
-    "previous_landmarks": None,
-    "previous_time": None,
-    "confirmed_fall": False
-}
+# --- History tracking for falling detection ---
+pose_history = {}  # Lưu lịch sử các frame để phát hiện đang ngã
+frame_counter = 0  # Đếm số frame đã xử lý
 
-class PoseAnalyzer:
-    @staticmethod
-    def calculate_angle(a: Tuple[float, float], b: Tuple[float, float], c: Tuple[float, float]) -> float:
-        """Tính góc giữa 3 điểm (tính bằng độ)"""
-        ba = (a[0]-b[0], a[1]-b[1])
-        bc = (c[0]-b[0], c[1]-b[1])
-        
-        dot_product = ba[0] * bc[0] + ba[1] * bc[1]
-        mag_ba = math.sqrt(ba[0]**2 + ba[1]**2)
-        mag_bc = math.sqrt(bc[0]**2 + bc[1]**2)
-        
-        angle_rad = math.acos(dot_product / (mag_ba * mag_bc))
-        return math.degrees(angle_rad)
+# --- Hằng số cấu hình cho phát hiện té ngã ---
+VISIBILITY_THRESHOLD = 0.6  # Ngưỡng visibility để sử dụng landmark
+FALL_DETECTION_FRAMES = 5  # Số frame liên tục phát hiện té ngã để kích hoạt cảnh báo
+FALLING_DETECTION_FRAMES = 3  # Số frame liên tục phát hiện đang ngã để kích hoạt cảnh báo
 
-    @staticmethod
-    def calculate_velocity(prev_point: Tuple[float, float], curr_point: Tuple[float, float], time_diff: float) -> float:
-        """Tính vận tốc di chuyển của điểm landmark"""
-        if time_diff == 0:
-            return 0
-        dx = curr_point[0] - prev_point[0]
-        dy = curr_point[1] - prev_point[1]
-        distance = math.sqrt(dx**2 + dy**2)
-        return distance / time_diff
-
-    @staticmethod
-    def get_landmark_coords(landmarks, idx: int) -> Optional[Tuple[float, float]]:
-        """Lấy tọa độ của landmark nếu visibility đủ cao"""
-        if landmarks.landmark[idx].visibility < VISIBILITY_THRESHOLD:
-            return None
-        return (landmarks.landmark[idx].x, landmarks.landmark[idx].y)
-
-    @staticmethod
-    def detect_fall(landmarks, previous_landmarks: Optional[mp_pose.PoseLandmark], 
-                   previous_time: Optional[float]) -> Tuple[bool, Dict[str, float]]:
-        """Phát hiện té ngã dựa trên các yếu tố: góc nghiêng, vận tốc, tỉ lệ chiều cao"""
-        detection_metrics = {
-            "torso_angle": 0,
-            "velocity": 0,
-            "height_ratio": 0,
-            "is_falling": False
-        }
-        
-        if landmarks is None:
-            return False, detection_metrics
-            
-        # Lấy các điểm mốc quan trọng
-        nose = PoseAnalyzer.get_landmark_coords(landmarks, mp_pose.PoseLandmark.NOSE)
-        left_shoulder = PoseAnalyzer.get_landmark_coords(landmarks, mp_pose.PoseLandmark.LEFT_SHOULDER)
-        right_shoulder = PoseAnalyzer.get_landmark_coords(landmarks, mp_pose.PoseLandmark.RIGHT_SHOULDER)
-        left_hip = PoseAnalyzer.get_landmark_coords(landmarks, mp_pose.PoseLandmark.LEFT_HIP)
-        right_hip = PoseAnalyzer.get_landmark_coords(landmarks, mp_pose.PoseLandmark.RIGHT_HIP)
-        left_ankle = PoseAnalyzer.get_landmark_coords(landmarks, mp_pose.PoseLandmark.LEFT_ANKLE)
-        right_ankle = PoseAnalyzer.get_landmark_coords(landmarks, mp_pose.PoseLandmark.RIGHT_ANKLE)
-        
-        # Kiểm tra xem có đủ điểm mốc không
-        if not all([nose, left_shoulder, right_shoulder, left_hip, right_hip]):
-            return False, detection_metrics
-        
-        # Tính toán các giá trị trung bình
-        shoulder_center = ((left_shoulder[0] + right_shoulder[0])/2, 
-                          (left_shoulder[1] + right_shoulder[1])/2)
-        hip_center = ((left_hip[0] + right_hip[0])/2, 
-                     (left_hip[1] + right_hip[1])/2)
-        
-        # 1. Tính góc nghiêng của thân trên (so với phương thẳng đứng)
-        vertical_angle = PoseAnalyzer.calculate_angle(
-            (shoulder_center[0], shoulder_center[1] - 0.1),  # Điểm phía trên vai
-            shoulder_center,
-            hip_center
-        )
-        detection_metrics["torso_angle"] = vertical_angle
-        
-        # 2. Tính tỉ lệ chiều cao hiện tại so với chiều cao đứng
-        if left_ankle and right_ankle:
-            height_current = abs(shoulder_center[1] - (left_ankle[1] + right_ankle[1])/2)
-            height_normal = abs(hip_center[1] - (left_ankle[1] + right_ankle[1])/2) * 2  # Ước lượng chiều cao đứng
-            height_ratio = height_current / height_normal if height_normal > 0 else 1
-            detection_metrics["height_ratio"] = height_ratio
-        else:
-            height_ratio = 1
-        
-        # 3. Tính vận tốc di chuyển của đầu (nếu có dữ liệu từ frame trước)
-        velocity = 0
-        current_time = time.time()
-        if previous_landmarks and previous_time and current_time > previous_time:
-            prev_nose = PoseAnalyzer.get_landmark_coords(previous_landmarks, mp_pose.PoseLandmark.NOSE)
-            if prev_nose and nose:
-                time_diff = current_time - previous_time
-                velocity = PoseAnalyzer.calculate_velocity(prev_nose, nose, time_diff)
-                detection_metrics["velocity"] = velocity
-        
-        # Kiểm tra điều kiện té ngã
-        is_falling = (
-            (vertical_angle > FALL_ANGLE_THRESHOLD) or  # Góc nghiêng lớn
-            (height_ratio < MIN_HEIGHT_RATIO) or         # Chiều cao giảm đáng kể
-            (velocity > FALL_VELOCITY_THRESHOLD)         # Di chuyển nhanh xuống
-        )
-        detection_metrics["is_falling"] = is_falling
-        
-        return is_falling, detection_metrics
+# Parameters for fall detection algorithm
+PARA_S_H_1 = 1.15  # Parameter for shoulder-hip ratio (upper bound)
+PARA_S_H_2 = 0.85  # Parameter for shoulder-hip ratio (lower bound)
+PARA_H_F = 0.6  # Parameter for hip-feet ratio
+FRAME_INTERVAL = 30  # Số frame để kiểm tra giữa các lần phát hiện đang ngã
 
 def log_fall_event_to_gcs(image_bytes: bytes, timestamp: float):
     client = storage.Client()
@@ -197,29 +98,109 @@ async def setting_page():
 def generate():
     global latest_frame
     while True:
-        if latest_frame is not None: # Kiểm tra None rõ ràng hơn
+        if latest_frame is not None:  # Kiểm tra None rõ ràng hơn
             yield (
                 b'--frame\r\n'
                 b'Content-Type: image/jpeg\r\n\r\n' + latest_frame + b'\r\n'
             )
         # Chờ một chút để giảm tải CPU, nhưng vẫn đủ nhanh để stream mượt
-        time.sleep(0.04) # ~25 FPS
+        time.sleep(0.04)  # ~25 FPS
 
 @app.get("/video_feed")
 async def video_feed():
     return StreamingResponse(generate(), media_type="multipart/x-mixed-replace; boundary=frame")
 
-# === HÀM PHÁT HIỆN TÉ NGÃ ĐƠN GIẢN HÓA (Nằm xuống = Ngã) ===
+def determine_body_orientation(landmarks):
+    """Xác định hướng cơ thể so với camera dựa trên landmarks"""
+    # Extract shoulder coordinates
+    shoulder_wide = abs(landmarks[11][0] - landmarks[12][0])
+    
+    # Calculate shoulder-hip height
+    s_h_high = abs((landmarks[23][1] + landmarks[24][1] - landmarks[11][1] - landmarks[12][1]) / 2)
+    
+    # Calculate shoulder width to shoulder-hip height ratio
+    rate1 = shoulder_wide / s_h_high if s_h_high > 0 else 0
+    
+    # Determine orientation based on ratio
+    if 0.2 < rate1 < 0.4:
+        return "sideway slight"
+    elif rate1 < 0.2:
+        return "sideway whole"
+    else:
+        return "front"
+
+def detect_fall(landmarks):
+    """Phát hiện té ngã dựa trên landmarks"""
+    # the height of the shoulder to hip
+    s_h_high = abs((landmarks[23][1] + landmarks[24][1] - landmarks[11][1] - landmarks[12][1]) / 2)
+    
+    # the length between the shoulder and the hip
+    s_h_long = np.sqrt(((landmarks[23][1] + landmarks[24][1] - landmarks[11][1] - landmarks[12][1]) / 2)**2 + 
+                       ((landmarks[23][0] + landmarks[24][0] - landmarks[11][0] - landmarks[12][0]) / 2)**2)
+    
+    # the height of the hip to feet
+    h_f_high = ((landmarks[28][1] + landmarks[27][1] - landmarks[24][1] - landmarks[23][1]) / 2)
+    
+    # the length between the hip and the feet
+    h_f_long = np.sqrt(((landmarks[28][1] + landmarks[27][1] - landmarks[24][1] - landmarks[23][1]) / 2)**2 + 
+                       ((landmarks[28][0] + landmarks[27][0] - landmarks[24][0] - landmarks[23][0]) / 2)**2)
+    
+    # Fall detection logic
+    # Step 1: check if not fall (normal posture)
+    if s_h_high < s_h_long * PARA_S_H_1 and s_h_high > s_h_long * PARA_S_H_2:
+        return False, "Not Fall"
+    
+    # Step 2: check if fall
+    elif h_f_high < PARA_H_F * h_f_long:
+        return True, "Fall Detected"
+    
+    # Else: likely just bending over
+    else:
+        return False, "Bend Over"
+
+def detect_falling(history, current_frame_id):
+    """Phát hiện đang ngã dựa trên history landmarks"""
+    # Cần ít nhất 6 frame để so sánh
+    if current_frame_id < 6 or str(current_frame_id - 6) not in history:
+        return False, "Not enough history"
+    
+    # Lấy landmarks hiện tại và trước đó 6 frame
+    now_lst = history[str(current_frame_id)]
+    pre_lst = history[str(current_frame_id - 6)]
+    
+    # Parameter settings
+    para_falling_s_h_1 = 1.15
+    para_falling_s_h_2 = 0.85
+    para_v_1 = 0.5
+    
+    # Calculate shoulder-hip height from previous frame
+    s_h_high = (pre_lst[23][1] - pre_lst[11][1] + pre_lst[24][1] - pre_lst[12][1]) / 2
+    s_h_long = np.sqrt(((pre_lst[23][1] + pre_lst[24][1] - pre_lst[11][1] - pre_lst[12][1]) / 2)**2 + 
+                       ((pre_lst[23][0] + pre_lst[24][0] - pre_lst[11][0] - pre_lst[12][0]) / 2)**2)
+    
+    # First check if not in normal posture
+    if s_h_high < s_h_long * para_falling_s_h_1 and s_h_high > s_h_long * para_falling_s_h_2:
+        return False, "Not falling"
+    
+    # Check if head is moving down rapidly relative to shoulders (falling)
+    elif now_lst[0][1] < para_v_1 * ((pre_lst[11][1] + pre_lst[12][1]) / 2):
+        return True, "Falling detected"
+    
+    return False, "Not falling"
+
+# === IMPROVED FALL DETECTION FUNCTION ===
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
-    global latest_frame, fall_frame, last_fall_time, fall_detection_state
+    global latest_frame, fall_frame, last_fall_time, fall_counter, pose_history, frame_counter, body_angle
 
     start_time = time.time()
+
     content = await file.read()
     np_img = np.frombuffer(content, np.uint8)
     img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
 
     if img is None:
+        print("Lỗi: Không thể decode ảnh")
         return {"message": "Image decode error"}
 
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -227,6 +208,10 @@ async def upload(file: UploadFile = File(...)):
 
     detected_fall_this_frame = False
     current_time = time.time()
+    detected_falling = False
+    
+    # Để hiển thị status lên hình ảnh
+    status_message = "Normal"
 
     if results.pose_landmarks:
         # Vẽ landmarks lên ảnh
@@ -238,51 +223,86 @@ async def upload(file: UploadFile = File(...)):
             connection_drawing_spec=mp_drawing.DrawingSpec(color=(245,66,230), thickness=2, circle_radius=2)
         )
 
-        # Phát hiện té ngã
-        is_falling, metrics = PoseAnalyzer.detect_fall(
-            results.pose_landmarks,
-            fall_detection_state["previous_landmarks"],
-            fall_detection_state["previous_time"]
-        )
-
-        # Cập nhật trạng thái phát hiện té ngã
-        if is_falling:
-            fall_detection_state["fall_counter"] += 1
-            if fall_detection_state["fall_counter"] >= FALL_CONFIRMATION_FRAMES:
-                fall_detection_state["confirmed_fall"] = True
+        # Convert landmarks to simpler format
+        lst = []
+        for i in results.pose_landmarks.landmark:
+            lst.append((i.x, i.y, i.z, i.visibility))
+        
+        # Store landmarks in history
+        pose_history[str(frame_counter)] = lst
+        frame_counter += 1
+        
+        # Determine body orientation
+        current_orientation = determine_body_orientation(lst)
+        # Update body_angle only if same orientation detected for multiple frames
+        if current_orientation == body_angle:
+            pass  # Keep current orientation
         else:
-            fall_detection_state["fall_counter"] = max(0, fall_detection_state["fall_counter"] - 1)
-            fall_detection_state["confirmed_fall"] = False
+            # For simplicity, we're immediately updating orientation instead of counting frames
+            body_angle = current_orientation
+        
+        # Fall detection
+        is_fall, fall_status = detect_fall(lst)
+        status_message = fall_status
+        
+        if is_fall:
+            fall_counter += 1
+            if fall_counter >= FALL_DETECTION_FRAMES and current_time - last_fall_time > fall_cooldown:
+                detected_fall_this_frame = True
+                last_fall_time = current_time
+                print(f"!!! FALL DETECTED !!! - {fall_status}")
+                
+                # Save fall image
+                _, jpeg_fall = cv2.imencode('.jpg', img)
+                fall_frame = jpeg_fall.tobytes()
+                log_fall_event_to_gcs(fall_frame, current_time)
+                
+                # Reset counter after detection
+                fall_counter = 0
+        else:
+            fall_counter = 0  # Reset counter if no fall detected
 
-        # Kiểm tra nếu phát hiện té ngã và đủ thời gian cooldown
-        if (fall_detection_state["confirmed_fall"] and 
-            current_time - last_fall_time > fall_cooldown):
-            detected_fall_this_frame = True
-            last_fall_time = current_time
-            print(f"!!! PHÁT HIỆN TÉ NGÃ !!! (Góc: {metrics['torso_angle']:.1f}°, "
-                  f"Vận tốc: {metrics['velocity']:.2f}, "
-                  f"Tỉ lệ chiều cao: {metrics['height_ratio']:.2f})")
+        # Falling detection (only process every FRAME_INTERVAL frames)
+        if frame_counter % FRAME_INTERVAL == 0:
+            is_falling, falling_status = detect_falling(pose_history, frame_counter)
+            if is_falling:
+                detected_falling = True
+                print(f"!!! FALLING DETECTED !!! - {falling_status}")
+                status_message = falling_status
+                
+                # We could save these frames too if needed
+                _, jpeg_fall = cv2.imencode('.jpg', img)
+                fall_frame = jpeg_fall.tobytes()
+                
+                # Clean up history periodically to avoid memory issues
+                if len(pose_history) > 120:  # Keep last ~4 seconds at 30fps
+                    old_keys = sorted([int(k) for k in pose_history.keys()])[:-120]
+                    for k in old_keys:
+                        if str(k) in pose_history:
+                            del pose_history[str(k)]
 
-            # Lưu ảnh và ghi log
-            _, jpeg_fall = cv2.imencode('.jpg', img)
-            fall_frame = jpeg_fall.tobytes()
-            log_fall_event_to_gcs(fall_frame, current_time)
-            fall_detection_state["fall_counter"] = 0
-            fall_detection_state["confirmed_fall"] = False
+    # Add status text to image
+    cv2.rectangle(img, (0, 0), (225, 130), (245, 117, 16), -1)
+    cv2.putText(img, 'Fall Counter', (15, 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+    cv2.putText(img, 'Body Angle', (15, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+    cv2.putText(img, str(fall_counter), (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.putText(img, str(body_angle), (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+    
+    # Add status message
+    cv2.putText(img, status_message, (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
 
-        # Cập nhật landmarks từ frame trước
-        fall_detection_state["previous_landmarks"] = results.pose_landmarks
-        fall_detection_state["previous_time"] = current_time
-
-    # Cập nhật frame mới nhất
+    # Luôn cập nhật latest_frame để hiển thị stream chính
     _, jpeg = cv2.imencode('.jpg', img)
     latest_frame = jpeg.tobytes()
 
     processing_time = time.time() - start_time
+
     return {
-        "message": "Image processed",
+        "message": "Image processed", 
         "fall_detected": detected_fall_this_frame,
-        "processing_time": processing_time
+        "falling_detected": detected_falling,
+        "body_angle": body_angle,
+        "processing_time_ms": round(processing_time * 1000, 2)
     }
 
 # Trigger feed (ảnh khi té ngã) (Giữ nguyên)
@@ -295,10 +315,9 @@ async def trigger_feed():
     else:
         # Trả về ảnh trống nếu chưa có cú ngã/nằm nào được ghi lại
         blank = np.zeros((200, 300, 3), dtype=np.uint8)
-        cv2.putText(blank, "No Lie Down Yet", (30, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        cv2.putText(blank, "No Fall Detected Yet", (30, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         _, jpeg = cv2.imencode('.jpg', blank)
         return StreamingResponse(BytesIO(jpeg.tobytes()), media_type="image/jpeg")
-
 
 # Nhận metrics (Giữ nguyên)
 @app.post("/metrics")
@@ -366,4 +385,4 @@ async def fall_stats():
 if __name__ == "__main__":
     import uvicorn
     # Chạy với reload=False khi deploy hoặc nếu không cần tự động tải lại khi sửa code
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False) # Tắt reload để tránh reset state khi có request
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)  # Tắt reload để tránh reset state khi có request
